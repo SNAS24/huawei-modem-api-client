@@ -1,1 +1,2 @@
-huawei-modem-api-client
+#huawei-modem-api-client
+huawei-lte-api
