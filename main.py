@@ -7,7 +7,7 @@ import os
 ip = os.getenv("MODEM_IP", "192.168.110.254")
 user = os.getenv("MODEM_USER", "admin")
 password = os.getenv("MODEM_PASS", "admin")
-MODEM_LINK = "http://192.168.110.254"
+MODEM_LINK = "http://192.168.110.254/"
 HEADERS = {'User-Agent': 'Mozilla/5.0'}
 LOGIN_DATA = {'Username': {user}, 'Password': {password}}
 
@@ -20,30 +20,76 @@ def get_session():
     s.post(f'{MODEM_LINK}index/login.cgi', data=LOGIN_DATA, headers=HEADERS)
     return s
 
+# def read_inbox(session):
+#     """Читает список SMS и возвращает список словарей"""
+#     response = session.get(f'{MODEM_LINK}html/sms/inbox.asp', headers=HEADERS)
+#     soup = BeautifulSoup(response.text, 'html.parser')
+    
+#     messages = []
+#     # Ищем строки таблицы с SMS
+#     rows = soup.find_all('tr', id=re.compile(r'^inbox_record_'))
+    
+#     for row in rows:
+#         cells = row.find_all('td')
+#         if len(cells) < 6: continue
+        
+#         # Извлекаем ID для удаления из функции onclick="deleteItem('9')"
+#         del_onclick = row.find('a', onclick=re.compile(r'deleteItem'))['onclick']
+#         sms_id = re.search(r"deleteItem\('(\d+)'\)", del_onclick).group(1)
+        
+#         messages.append({
+#             'id': sms_id,
+#             'sender': cells[2].get_text(strip=True),
+#             'text': cells[3].get_text(strip=True),
+#             'date': cells[4].get_text(strip=True)
+#         })
+#     return messages
+
 def read_inbox(session):
-    """Читает список SMS и возвращает список словарей"""
     response = session.get(f'{MODEM_LINK}html/sms/inbox.asp', headers=HEADERS)
+    # Если модем отдает кодировку некорректно, раскомментируйте строку ниже:
+    # response.encoding = 'utf-8' 
+    
     soup = BeautifulSoup(response.text, 'html.parser')
-    
     messages = []
-    # Ищем строки таблицы с SMS
-    rows = soup.find_all('tr', id=re.compile(r'^inbox_record_'))
     
+    # Находим все строки TR, которые начинаются на inbox_record_
+    rows = soup.find_all('tr', id=re.compile(r'^inbox_record_\d+$'))
+    
+    if not rows:
+        print("DEBUG: Строки в таблице не найдены. Проверьте авторизацию.")
+        return []
+
     for row in rows:
+        # Получаем порядковый номер строки из id (например, '1' из 'inbox_record_1')
+        row_num = row['id'].split('_')[-1]
+        
+        # 1. Отправитель (id заканчивается на _2)
+        sender_div = row.find(id=f'inbox_record_{row_num}_2')
+        sender = sender_div.get_text(strip=True) if sender_div else "Неизвестен"
+        
+        # 2. Текст сообщения (div с name="divContentName")
+        content_div = row.find('div', {'name': 'divContentName'})
+        content = content_div.get_text(strip=True) if content_div else "Пусто"
+        
+        # 3. Дата (обычно это 5-й по счету TD)
         cells = row.find_all('td')
-        if len(cells) < 6: continue
+        date = cells[4].get_text(strip=True) if len(cells) > 4 else "Нет даты"
         
-        # Извлекаем ID для удаления из функции onclick="deleteItem('9')"
-        del_onclick = row.find('a', onclick=re.compile(r'deleteItem'))['onclick']
-        sms_id = re.search(r"deleteItem\('(\d+)'\)", del_onclick).group(1)
-        
+        # 4. ID для удаления из ссылки onclick
+        del_link = row.find('a', onclick=re.compile(r'deleteItem'))
+        sms_id = re.search(r"deleteItem\('(\d+)'\)", del_link['onclick']).group(1) if del_link else None
+
         messages.append({
             'id': sms_id,
-            'sender': cells[2].get_text(strip=True),
-            'text': cells[3].get_text(strip=True),
-            'date': cells[4].get_text(strip=True)
+            'sender': sender,
+            'text': content,
+            'date': date
         })
+        
     return messages
+
+
 
 def delete_sms(session, sms_id):
     """Удаляет SMS по его ID"""
